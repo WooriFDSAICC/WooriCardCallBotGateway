@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Callbot Gateway 실행 가이드
+    url: https://github.com/WooriFDSAICC/WooriCardCallBotGateway/blob/main/docs/RUNNING.md
+    about: Docker·uvicorn·Swagger 실행 방법
