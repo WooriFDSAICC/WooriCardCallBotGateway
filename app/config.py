@@ -22,5 +22,13 @@ class Settings(BaseSettings):
 
     triton_startup_check: bool = True
 
+    redis_enabled: bool = True
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_password: str = ""
+    redis_db: int = 0
+
+    outbound_opening_ment_enabled: bool = True
+    outbound_opening_ment_text: str = "안녕하세요, 우리카드입니다. 고객님께 안내드릴 내용이 있습니다."
 
 settings = Settings()
