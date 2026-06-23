@@ -6,6 +6,8 @@ class WebSocketConstants:
     """WebSocket 프로토콜 및 라우팅 상수."""
 
     STREAM_PATH: str = "/v1/stream/{session_id}"
+    STREAM_INBOUND_PATH: str = "/v1/stream/inbound/{session_id}"
+    STREAM_OUTBOUND_PATH: str = "/v1/stream/outbound/{session_id}"
     HEALTH_PATH: str = "/health"
 
     MSG_DISCONNECT: str = "websocket.disconnect"

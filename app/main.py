@@ -7,19 +7,24 @@ from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.config import settings
+from app import metrics as _metrics  # noqa: F401 — register Prometheus collectors
 from app.constants.websocket import WebSocketConstants
+from app.metrics import APPLICATION, triton_up
 from app.routers import stream
 from app.services.voice.analysis_result_builder import AnalysisResultBuilder
 from app.services.voice.audio_preprocessor import AudioPreprocessor
 from app.services.voice.inference_pipeline import InferencePipeline
 from app.services.voice.triton_client import TritonInferenceClient
 from app.session_registry import SessionStateRegistry
+from app.utils.log_context import configure_logging
+from app.utils.otel import instrument_fastapi
 from app.utils.triton_health import check_triton_ready
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
 )
+configure_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -27,6 +32,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     if settings.triton_startup_check:
         ready = await check_triton_ready(settings.triton_http_url)
+        triton_up.labels(application=APPLICATION).set(1 if ready else 0)
         if not ready:
             raise RuntimeError(f"Triton not ready: {settings.triton_http_url}")
 
@@ -44,6 +50,8 @@ async def lifespan(app: FastAPI):
     app.state.inference_pipeline = voice_pipeline
     app.state.session_registry = session_registry
 
+    await stream.stream_session_service.startup()
+
     logger.info(
         "%s started port=%d triton_url=%s metrics=%s",
         settings.app_name,
@@ -54,6 +62,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    await stream.stream_session_service.shutdown()
     await triton_client.shutdown()
     logger.info("%s shutdown complete", settings.app_name)
 
@@ -65,6 +74,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+instrument_fastapi(app)
+
 if settings.metrics_enabled:
     Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
@@ -73,12 +84,16 @@ app.include_router(stream.router)
 
 @app.get(WebSocketConstants.HEALTH_PATH)
 async def health_check():
+    ready = await check_triton_ready(settings.triton_http_url)
+    triton_up.labels(application=APPLICATION).set(1 if ready else 0)
     return {
-        "status": "UP",
+        "status": "UP" if ready else "DEGRADED",
         "service": settings.app_name,
         "capabilities": {
             "voice_stream": True,
+            "voice_stream_inbound": True,
+            "voice_stream_outbound": True,
         },
         "triton_http_url": settings.triton_http_url,
-        "triton_ready": True,
+        "triton_ready": ready,
     }

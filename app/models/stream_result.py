@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from app.constants.fds import FdsConstants
+from app.constants.integration_contract import EVENT_STT_PARTIAL
 
 
 class StreamAnalysisResult(BaseModel):
@@ -12,7 +13,7 @@ class StreamAnalysisResult(BaseModel):
 
     status: str = Field(default=FdsConstants.STATUS_PROCESSING)
     fds_flag: str = Field(default=FdsConstants.FLAG_NORMAL)
-    event: str = Field(default=FdsConstants.EVENT_STT_PARTIAL)
+    event: str = Field(default=EVENT_STT_PARTIAL)
     text: str = Field(default="")
     stt_text: str = Field(default="")
     fds_score: float = Field(default=0.0, ge=0.0, le=1.0)

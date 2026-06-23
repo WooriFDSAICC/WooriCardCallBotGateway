@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from __future__ import annotations
-
 import logging
 from dataclasses import dataclass, field
+
+from app.constants.call_direction import CallDirection
+from app.metrics import APPLICATION, callbot_active_sessions
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,8 @@ class StreamSessionState:
     """
 
     session_id: str
+    call_direction: CallDirection = CallDirection.INBOUND
+    campaign_id: str | None = None
     chunk_count: int = 0
     total_bytes_received: int = 0
     is_active: bool = True
@@ -35,9 +38,14 @@ class StreamSessionState:
             return
         self.is_active = False
         self._cleanup_done = True
+        callbot_active_sessions.labels(
+            direction=self.call_direction.metric_label(),
+            application=APPLICATION,
+        ).dec()
         logger.info(
-            "[SessionState] cleaned session=%s chunks=%d bytes=%d escalation=%s",
+            "[SessionState] cleaned session=%s direction=%s chunks=%d bytes=%d escalation=%s",
             self.session_id,
+            self.call_direction.value,
             self.chunk_count,
             self.total_bytes_received,
             self.escalation_sent,
@@ -50,9 +58,22 @@ class SessionStateRegistry:
     def __init__(self) -> None:
         self._sessions: dict[str, StreamSessionState] = {}
 
-    def create(self, session_id: str) -> StreamSessionState:
-        state = StreamSessionState(session_id=session_id)
+    def create(
+        self,
+        session_id: str,
+        call_direction: CallDirection = CallDirection.INBOUND,
+        campaign_id: str | None = None,
+    ) -> StreamSessionState:
+        state = StreamSessionState(
+            session_id=session_id,
+            call_direction=call_direction,
+            campaign_id=campaign_id,
+        )
         self._sessions[session_id] = state
+        callbot_active_sessions.labels(
+            direction=call_direction.metric_label(),
+            application=APPLICATION,
+        ).inc()
         return state
 
     def get(self, session_id: str) -> StreamSessionState | None:

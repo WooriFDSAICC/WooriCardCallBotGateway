@@ -1,28 +1,64 @@
 """AI팀·백엔드 연동 계약 (스키마 v1.0). Relay IntegrationContracts.java 와 동기화."""
 from dataclasses import dataclass
 
+# ── Module-level aliases (Java IntegrationContracts 1:1) ──
+SCHEMA_VERSION = "1.0"
+
+TOPIC_FDS_EVENTS = "wooricard-fds-events"
+TOPIC_FDS_SCORES = "wooricard-fds-scores"
+TOPIC_FDS_ACTIONS = "wooricard-fds-actions"
+TOPIC_FDS_DLQ = "wooricard-fds-events-dlq"
+
+EVENT_STT_PARTIAL = "STT_PARTIAL"
+EVENT_AGENT_ESCALATION = "AGENT_ESCALATION"
+EVENT_SESSION_ENDED = "SESSION_ENDED"
+
+TRITON_MODEL_STT = "stt_streaming"
+TRITON_MODEL_ASD = "asd_voiceprint"
+TRITON_MODEL_FDS = "fds_lgbm"
+
+FEATURE_STORE_KEY_PREFIX = "fds:feature:"
+
+CALL_DIRECTION_INBOUND = "INBOUND"
+CALL_DIRECTION_OUTBOUND = "OUTBOUND"
+
+SESSION_REDIS_KEY_PREFIX = "wooricard:session:"
+
 
 @dataclass(frozen=True)
 class IntegrationContract:
-    SCHEMA_VERSION: str = "1.0"
+    SCHEMA_VERSION: str = SCHEMA_VERSION
 
-    TRITON_MODEL_STT: str = "stt_streaming"
-    TRITON_MODEL_ASD: str = "asd_voiceprint"
-    TRITON_MODEL_FDS: str = "fds_lgbm"
+    TOPIC_FDS_EVENTS: str = TOPIC_FDS_EVENTS
+    TOPIC_FDS_SCORES: str = TOPIC_FDS_SCORES
+    TOPIC_FDS_ACTIONS: str = TOPIC_FDS_ACTIONS
+    TOPIC_FDS_DLQ: str = TOPIC_FDS_DLQ
+
+    EVENT_STT_PARTIAL: str = EVENT_STT_PARTIAL
+    EVENT_AGENT_ESCALATION: str = EVENT_AGENT_ESCALATION
+    EVENT_SESSION_ENDED: str = EVENT_SESSION_ENDED
+
+    TRITON_MODEL_STT: str = TRITON_MODEL_STT
+    TRITON_MODEL_ASD: str = TRITON_MODEL_ASD
+    TRITON_MODEL_FDS: str = TRITON_MODEL_FDS
+
+    FEATURE_STORE_KEY_PREFIX: str = FEATURE_STORE_KEY_PREFIX
+
+    CALL_DIRECTION_INBOUND: str = CALL_DIRECTION_INBOUND
+    CALL_DIRECTION_OUTBOUND: str = CALL_DIRECTION_OUTBOUND
+
+    SESSION_REDIS_KEY_PREFIX: str = SESSION_REDIS_KEY_PREFIX
 
     TRITON_INFER_PATH: str = "/v2/models/{model}/infer"
     TRITON_HEALTH_READY_PATH: str = "/v2/health/ready"
 
-    # STT infer inputs
     INPUT_CHUNK_INDEX: str = "CHUNK_INDEX"
     INPUT_ESCALATION_THRESHOLD: str = "ESCALATION_THRESHOLD"
     INPUT_SESSION_ID: str = "SESSION_ID"
 
-    # STT infer outputs
     OUTPUT_TEXT: str = "TEXT"
     OUTPUT_CONFIDENCE: str = "CONFIDENCE"
     OUTPUT_IS_PARTIAL: str = "IS_PARTIAL"
 
-    # ASD infer outputs
     OUTPUT_SPOOF_SCORE: str = "SPOOF_SCORE"
     OUTPUT_IS_SUSPICIOUS: str = "IS_SUSPICIOUS"
