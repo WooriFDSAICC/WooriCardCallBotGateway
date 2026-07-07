@@ -28,3 +28,10 @@ triton_up = Gauge(
     "Triton inference server readiness (1=ready)",
     ["application"],
 )
+
+# ── TTS 발화 결정 발행(오디오 재생은 TTS Worker 담당) ──
+callbot_tts_decisions_total = Counter(
+    "callbot_tts_decisions_total",
+    "Gateway 가 발행한 TTS 결정 이벤트",
+    ["direction", "decision", "application"],   # decision: say|stop
+)
