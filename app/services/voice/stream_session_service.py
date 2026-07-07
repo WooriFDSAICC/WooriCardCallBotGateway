@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 
@@ -8,10 +9,13 @@ from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from app.config import settings
 from app.constants.call_direction import CallDirection
+from app.constants.fds import FdsConstants
 from app.constants.websocket import WebSocketConstants
 from app.models.stream_result import StreamAnalysisResult
-from app.metrics import APPLICATION, callbot_escalations_total, callbot_stt_response_seconds
+from app.metrics import (APPLICATION, callbot_escalations_total,
+                         callbot_stt_response_seconds, callbot_tts_decisions_total)
 from app.services.outbound_session_lookup import OutboundSessionLookup
+from app.services.voice.analysis_result_builder import AnalysisResultBuilder
 from app.utils.log_context import bind_session, clear_session
 from app.services.voice.inference_pipeline import InferencePipeline
 from app.session_registry import SessionStateRegistry, StreamSessionState
@@ -20,7 +24,11 @@ logger = logging.getLogger(__name__)
 
 
 class StreamSessionService:
-    """WebSocket 스트림 세션 처리 — 수신/검증/추론/피드백/정리 전담."""
+    """WebSocket 스트림 세션 처리 — 수신/검증/추론/피드백/정리 전담.
+
+    TTS 오디오 생성은 독립 TTS Worker 담당. 이 서비스는 봇 발화 '결정'(TTS_SAY/
+    TTS_STOP)을 결과 채널로 발행할 뿐이며, Relay 가 이를 Worker 로 라우팅한다.
+    """
 
     def __init__(self) -> None:
         self._outbound_lookup = OutboundSessionLookup()
@@ -88,6 +96,43 @@ class StreamSessionService:
             return
         opening = pipeline.build_outbound_opening(session_id, session_state.campaign_id)
         await self._send_result(websocket, session_id, opening)
+        # 오프닝 멘트를 봇 발화로 재생하도록 TTS_SAY 결정 발행(오디오는 Worker 가 생성).
+        if settings.tts_speak_outbound_opening:
+            await self._emit_tts_say(websocket, session_state, opening.stt_text or opening.text)
+
+    async def _emit_tts_say(
+        self, websocket: WebSocket, session_state: StreamSessionState, text: str,
+        voice: str | None = None, emotion: str | None = None,
+        lang: str | None = None, speed: float | None = None, instruct: str | None = None,
+    ) -> None:
+        if not settings.tts_enabled or not text or not text.strip():
+            return
+        say = AnalysisResultBuilder.build_tts_say(
+            session_state.session_id, text, session_state.call_direction,
+            campaign_id=session_state.campaign_id,
+            voice=voice or settings.tts_voice, emotion=emotion,
+            lang=lang, speed=speed, instruct=instruct,
+        )
+        await self._send_result(websocket, session_state.session_id, say)
+        session_state.tts_bot_speaking = True
+        callbot_tts_decisions_total.labels(
+            direction=session_state.call_direction.metric_label(),
+            decision="say", application=APPLICATION).inc()
+
+    async def _emit_tts_stop(
+        self, websocket: WebSocket, session_state: StreamSessionState
+    ) -> None:
+        # 실제로 발화 중일 때만 STOP 발행(중복/불필요 취소 방지). Worker stop 은 멱등.
+        if not settings.tts_enabled or not session_state.tts_bot_speaking:
+            return
+        stop = AnalysisResultBuilder.build_tts_stop(
+            session_state.session_id, session_state.call_direction,
+            campaign_id=session_state.campaign_id)
+        await self._send_result(websocket, session_state.session_id, stop)
+        session_state.tts_bot_speaking = False
+        callbot_tts_decisions_total.labels(
+            direction=session_state.call_direction.metric_label(),
+            decision="stop", application=APPLICATION).inc()
 
     async def _receive_loop(
         self,
@@ -107,8 +152,9 @@ class StreamSessionService:
 
             raw_bytes = message.get("bytes")
             if raw_bytes is None:
-                if message.get("text"):
-                    logger.debug("[StreamSession] Ignored text frame session=%s", session_id)
+                text_frame = message.get("text")
+                if text_frame:
+                    await self._handle_control_frame(websocket, session_state, text_frame)
                 continue
 
             if not raw_bytes:
@@ -139,6 +185,13 @@ class StreamSessionService:
             if result is None:
                 continue
 
+            # barge-in: 고객 발화(STT partial)가 감지되면 봇 발화 중단(TTS_STOP)을 발행.
+            if settings.tts_barge_in_enabled and result.stt_text:
+                speaker = (result.metadata or {}).get(FdsConstants.METADATA_SPEAKER)
+                if speaker == FdsConstants.SPEAKER_CUSTOMER and session_state.tts_bot_speaking:
+                    await self._emit_tts_stop(websocket, session_state)
+                    logger.info("[StreamSession] barge-in (TTS_STOP) session=%s", session_id)
+
             direction = session_state.call_direction.metric_label()
             callbot_stt_response_seconds.labels(direction=direction, application=APPLICATION).observe(
                 time.perf_counter() - started
@@ -151,6 +204,35 @@ class StreamSessionService:
                 callbot_escalations_total.labels(direction=direction, application=APPLICATION).inc()
                 session_state.mark_escalation_sent()
                 break
+
+    async def _handle_control_frame(
+        self, websocket: WebSocket, session_state: StreamSessionState, text_frame: str
+    ) -> None:
+        """제어 텍스트 프레임 — 대화엔진 연동 seam.
+
+        {"op":"say","text":"...", "voice"?, "emotion"?, ...} → TTS_SAY 발행.
+        {"op":"stop"} → TTS_STOP 발행. 파싱 실패/미지원 op 는 무시.
+        """
+        try:
+            msg = json.loads(text_frame)
+        except (ValueError, TypeError):
+            logger.debug("[StreamSession] Ignored non-JSON text frame session=%s",
+                         session_state.session_id)
+            return
+        op = msg.get("op")
+        if op == "say":
+            await self._emit_tts_say(
+                websocket, session_state, str(msg.get("text", "") or ""),
+                voice=msg.get("voice"), emotion=msg.get("emotion"),
+                lang=msg.get("lang"),
+                speed=(float(msg["speed"]) if msg.get("speed") is not None else None),
+                instruct=msg.get("instruct"),
+            )
+        elif op == "stop":
+            await self._emit_tts_stop(websocket, session_state)
+        else:
+            logger.debug("[StreamSession] Unknown control op=%s session=%s",
+                         op, session_state.session_id)
 
     async def _send_result(
         self,
