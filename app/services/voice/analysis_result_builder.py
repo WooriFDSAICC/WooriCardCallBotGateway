@@ -1,6 +1,6 @@
 from app.constants.call_direction import CallDirection
 from app.constants.fds import FdsConstants
-from app.constants.integration_contract import EVENT_STT_PARTIAL
+from app.constants.integration_contract import EVENT_STT_PARTIAL, EVENT_TTS_SAY, EVENT_TTS_STOP
 from app.config import settings
 from app.services.voice.inference_models import AsdInferenceOutput, SttInferenceOutput
 from app.models.stream_result import StreamAnalysisResult
@@ -46,6 +46,62 @@ class AnalysisResultBuilder:
                 None,
                 CallDirection.OUTBOUND,
                 campaign_id,
+                **{FdsConstants.METADATA_SPEAKER: FdsConstants.SPEAKER_BOT},
+            ),
+        )
+
+    @staticmethod
+    def build_tts_say(
+        session_id: str,
+        text: str,
+        call_direction: CallDirection,
+        campaign_id: str | None = None,
+        voice: str | None = None,
+        emotion: str | None = None,
+        lang: str | None = None,
+        speed: float | None = None,
+        instruct: str | None = None,
+    ) -> StreamAnalysisResult:
+        """봇 발화 요청(TTS_SAY) — Relay 가 TTS Worker 로 라우팅. FDS 비대상 제어 이벤트."""
+        extra: dict = {FdsConstants.METADATA_SPEAKER: FdsConstants.SPEAKER_BOT}
+        if voice:
+            extra["tts_voice"] = voice
+        if emotion:
+            extra["tts_emotion"] = emotion
+        if lang:
+            extra["tts_lang"] = lang
+        if speed is not None:
+            extra["tts_speed"] = speed
+        if instruct:
+            extra["tts_instruct"] = instruct
+        return StreamAnalysisResult(
+            status=FdsConstants.STATUS_PROCESSING,
+            fds_flag=FdsConstants.FLAG_NORMAL,
+            event=EVENT_TTS_SAY,
+            text=text,
+            stt_text=text,
+            fds_score=0.0,
+            metadata=AnalysisResultBuilder._base_metadata(
+                session_id, None, call_direction, campaign_id, **extra,
+            ),
+        )
+
+    @staticmethod
+    def build_tts_stop(
+        session_id: str,
+        call_direction: CallDirection,
+        campaign_id: str | None = None,
+    ) -> StreamAnalysisResult:
+        """봇 발화 중단(TTS_STOP, barge-in) — Relay 가 TTS Worker 로 라우팅."""
+        return StreamAnalysisResult(
+            status=FdsConstants.STATUS_PROCESSING,
+            fds_flag=FdsConstants.FLAG_NORMAL,
+            event=EVENT_TTS_STOP,
+            text="",
+            stt_text="",
+            fds_score=0.0,
+            metadata=AnalysisResultBuilder._base_metadata(
+                session_id, None, call_direction, campaign_id,
                 **{FdsConstants.METADATA_SPEAKER: FdsConstants.SPEAKER_BOT},
             ),
         )
