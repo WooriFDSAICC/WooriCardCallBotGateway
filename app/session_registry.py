@@ -23,6 +23,7 @@ class StreamSessionState:
     total_bytes_received: int = 0
     is_active: bool = True
     escalation_sent: bool = False
+    tts_bot_speaking: bool = False   # 봇 발화 결정(SAY) 발행됨 → STOP 발행 후 해제(근사)
     _cleanup_done: bool = field(default=False, repr=False)
 
     def increment(self, byte_length: int) -> int:
